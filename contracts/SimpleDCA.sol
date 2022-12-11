@@ -1,33 +1,30 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.9;
+pragma solidity =0.8.17;
 pragma abicoder v2;
 
 import '@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol';
 import '@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol';
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/interfaces/IERC20.sol";
+import '@openzeppelin/contracts/access/AccessControl.sol';
+import '@openzeppelin/contracts/access/Ownable.sol';
+import '@openzeppelin/contracts/interfaces/IERC20.sol';
+import './IWETH.sol';
 
-interface IWETH9 is IERC20 {
-  function deposit() external payable;
-  function withdraw(uint amount) external;
-}
 contract SimpleDCA is Ownable, AccessControl {
   ISwapRouter public immutable swapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
   address public constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
   address public constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
   address public constant WETH9 = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-  IERC20 usdcToken = IERC20(USDC);
-  IERC20 wbtcToken = IERC20(WBTC);
-  IWETH9 wethToken = IWETH9(WETH9);
+  IERC20 private usdcToken = IERC20(USDC);
+  IERC20 private wbtcToken = IERC20(WBTC);
+  IWETH private wethToken = IWETH(WETH9);
 
   uint256 public buyInterval = 1 days;
   uint256 public minLockDuration = 30 seconds;
   uint256 public maxLockDuration = 365 days;
   // For this example, we will set the pool fee to 0.01%.
-  uint24 public constant poolFee = 3000;
+  uint24 public constant POOL_FEE = 3000;
 
   struct LockInformation {
     string tokenSymbol;
@@ -36,8 +33,8 @@ contract SimpleDCA is Ownable, AccessControl {
     uint256 expiryTimestamp;
   }
 
-  mapping (address => LockInformation[]) userLockInfo;
-  mapping (address => bool) lockedAccounts;
+  mapping (address => LockInformation[]) private userLockInfo;
+  mapping (address => bool) private lockedAccounts;
 
   constructor() {
     // this token address is LINK token deployed on Rinkeby testnet
@@ -52,19 +49,19 @@ contract SimpleDCA is Ownable, AccessControl {
 
   modifier IsValidToken(string memory _tokenSymbol, bool _onlyUSDC) {
     if (_onlyUSDC) {
-      require(_compareStrings(_tokenSymbol, 'USDC'), "Token Symbol MUST be 'USDC'");
+      require(_compareStrings(_tokenSymbol, 'USDC'), 'Token Symbol MUST be `USDC`');
     } else {
       require(
         _compareStrings(_tokenSymbol, 'USDC') ||
         _compareStrings(_tokenSymbol, 'WBTC') ||
         _compareStrings(_tokenSymbol, 'WETH'),
-        "Token Symbol MUST be 'USDC' or 'WBTC'"
+        'Token Symbol MUST be `USDC` or `WBTC`'
       );
     }
     _;
   }
 
-  function GetUserTokenBalance(string memory _tokenSymbol) public view IsValidToken(_tokenSymbol, false) returns (uint256){
+  function getUserTokenBalance(string memory _tokenSymbol) public view IsValidToken(_tokenSymbol, false) returns (uint256){
     if (_compareStrings(_tokenSymbol, 'USDC')) {
       return usdcToken.balanceOf(msg.sender);
     } else if (_compareStrings(_tokenSymbol, 'WBTC')) {
@@ -79,7 +76,7 @@ contract SimpleDCA is Ownable, AccessControl {
     return true;
   } */
    
-  function GetAllowance(string memory _tokenSymbol) public view IsValidToken(_tokenSymbol, false) returns(uint256){
+  function getAllowance(string memory _tokenSymbol) public view IsValidToken(_tokenSymbol, false) returns(uint256){
     if (_compareStrings(_tokenSymbol, 'USDC')) {
       return usdcToken.allowance(msg.sender, address(this));
     } else {
@@ -87,20 +84,30 @@ contract SimpleDCA is Ownable, AccessControl {
     }
   }
 
-  function Approve(uint256 _amount) public IsValidToken("USDC", true) returns (bool) {
+  function approve(uint256 _amount) public IsValidToken('USDC', true) returns (bool) {
     // uint256 userBalance = GetUserTokenBalance("USDC");
     uint256 userBalance = usdcToken.balanceOf(msg.sender);
-    require( userBalance >= _amount, "Wallet does not have enough balance");
+    require( userBalance >= _amount, 'Wallet does not have enough balance');
     // Approve this contract to spend USDC. (approve the total amount)
     return usdcToken.approve(address(this), _amount);
     // require(GetAllowance("USDC") > 0, "Aproval error");
     //return true;
   }
    
-  function LockTokens(uint256 _tokenamount, uint256 _duration, string memory _buyTokenSymbol) IsValidToken(_buyTokenSymbol, true) public returns(bool) {
+  function lockTokens(uint256 _tokenamount, uint256 _duration, string memory _buyTokenSymbol)
+    public
+    IsValidToken(_buyTokenSymbol, true)
+    returns(bool)
+  {
     // require(_tokenamount >= GetAllowance(), "Please approve tokens before transferring");
-    require(GetUserTokenBalance(_buyTokenSymbol) >= _tokenamount, "Wallet does not have enough balance");
-    require(_duration >= minLockDuration && _duration <= maxLockDuration, "Tokens can not be locked for less than 7 days or more than 365 days");
+    require(
+      getUserTokenBalance(_buyTokenSymbol) >= _tokenamount,
+      'Wallet does not have enough balance'
+    );
+    require(
+      _duration >= minLockDuration && _duration <= maxLockDuration,
+      'Tokens can not be locked for less than 7 days or more than 365 days'
+    );
     
     // no need for if as modifier enforces only usdc can be passed as _buyTokenSymbol
     // if (_compareStrings(_buyTokenSymbol, 'USDC')) {
@@ -120,8 +127,8 @@ contract SimpleDCA is Ownable, AccessControl {
     return true;
   }
 
-  function UnlockTokens() public {
-    require(lockedAccounts[msg.sender]);
+  function unlockTokens() public {
+    require(lockedAccounts[msg.sender], 'Sender does not have locked account');
     LockInformation[] storage userLocks = userLockInfo[msg.sender];
 
     for (uint i = 0; i< userLocks.length; i++) {
@@ -143,7 +150,7 @@ contract SimpleDCA is Ownable, AccessControl {
     delete userLockInfo[msg.sender];
   }
    
-  function GetContractTokenBalance(string memory _tokenSymbol) public view onlyOwner IsValidToken(_tokenSymbol, false) returns(uint256){
+  function getContractTokenBalance(string memory _tokenSymbol) public view onlyOwner IsValidToken(_tokenSymbol, false) returns(uint256){
     if (_compareStrings(_tokenSymbol, 'USDC')) {
       return usdcToken.balanceOf(address(this));
     } else if (_compareStrings(_tokenSymbol, 'WBTC')) {
@@ -165,7 +172,7 @@ contract SimpleDCA is Ownable, AccessControl {
       ISwapRouter.ExactInputSingleParams({
         tokenIn: USDC,
         tokenOut: WBTC,
-        fee: poolFee,
+        fee: POOL_FEE,
         recipient: msg.sender,
         deadline: block.timestamp,
         amountIn: amountIn,
@@ -177,10 +184,10 @@ contract SimpleDCA is Ownable, AccessControl {
   }
 
   function swapForUSDC() external payable returns (uint256 amountOut) {
-    require(msg.value > 0.1 ether, "Msg.value must be greater than 1");
+    require(msg.value > 0.1 ether, 'Msg.value must be greater than 1');
 
     wethToken.deposit{value: msg.value}();
-    require(wethToken.balanceOf(address(this)) == msg.value, "Contract does not have the correct weth amount");
+    require(wethToken.balanceOf(address(this)) == msg.value, 'Contract does not have the correct weth amount');
     // 
     TransferHelper.safeApprove(WETH9, address(swapRouter), msg.value);
     // Naively set amountOutMinimum to 0. In production, use an oracle or other data source to choose a safer value for amountOutMinimum.
@@ -189,7 +196,7 @@ contract SimpleDCA is Ownable, AccessControl {
       ISwapRouter.ExactInputSingleParams({
         tokenIn: WETH9,
         tokenOut: USDC,
-        fee: poolFee,
+        fee: POOL_FEE,
         recipient: msg.sender,
         deadline: block.timestamp + 30 seconds,
         amountIn: msg.value,
@@ -201,7 +208,7 @@ contract SimpleDCA is Ownable, AccessControl {
   }
 
   function swapForWETH() public payable returns (bool) {
-    require(msg.value > 0.1 ether, "Must pass at least 0.1 ETH in msg.value");
+    require(msg.value > 0.1 ether, 'Must pass at least 0.1 ETH in msg.value');
 
     wethToken.deposit{value: msg.value}();
     wethToken.transfer(msg.sender, msg.value);
