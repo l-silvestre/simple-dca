@@ -1,0 +1,4 @@
+{
+  "solidity.linter": "solhint",
+  "editor.tabSize": 2,
+}

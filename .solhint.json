@@ -1,0 +1,12 @@
+{
+  "extends": "solhint:recommended",
+  "plugins": [],
+  "rules": {
+    "code-complexity": ["warn", 7],
+    "max-line-length": ["error", 140],
+    "constructor-syntax": "warn",
+    "quotes": ["warn", "single"],
+    "compiler-version": ["warn", "^0.8.0"],
+    "reason-string": ["error", { "maxLength": 255 }]
+  }
+}
