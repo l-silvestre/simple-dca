@@ -10,7 +10,10 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
 
   mapping (address => mapping (bytes32 => uint256)) private accountTaskToInvestmentIdx;
   mapping (address => mapping (uint256 => bytes32)) private accountInvestmentIdxToTask;
-  event CounterTaskCreated(bytes32 taskId);
+
+  event TaskCreatedEvent(bytes32 taskId);
+  event TaskCanceledEvent(bytes32 taskId);
+  event TaskFinishedEvent(bytes32 taskId);
 
   struct InvestmentTask {
     Investment investment;
@@ -26,12 +29,12 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
     OpsTaskCreator(_ops, _fundsOwner)
     SimpleDCAV2(_tokens)
   {
-    interval = 2 minutes;
+    interval = 2 minutes; // testing value
   }
 
   function createTask(uint256 _amount, string memory _buyTokenSymbol, uint256 _duration)
     external
-    returns (bool)
+    returns (bytes32)
   {
     uint256 accountInvestmentIdx = startInvestment(_amount, _buyTokenSymbol, _duration, msg.sender);
 
@@ -60,8 +63,8 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
 
     accountTaskToInvestmentIdx[msg.sender][id] = accountInvestmentIdx;
     accountInvestmentIdxToTask[msg.sender][accountInvestmentIdx] = id;
-    emit CounterTaskCreated(id);
-    return true;
+    emit TaskCreatedEvent(id);
+    return id;
   }
 
   function cancelTask(uint256 _accountInvestmentIdx) external returns(bool) {
@@ -87,7 +90,16 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
   function checker(address _account, uint256 _accountInvestmenIdx) external returns (bool canExec, bytes memory execPayload) {
     Investment memory temp = investments[msg.sender][_accountInvestmenIdx];
     canExec = block.timestamp < temp.expiryTimestamp;
-    cancelTaskInternal(_account, _accountInvestmenIdx);
+    if (!canExec) {
+      cancelTaskInternal(_account, _accountInvestmenIdx);
+      bytes32 taskId = accountInvestmentIdxToTask[_account][_accountInvestmenIdx];
+      emit TaskFinishedEvent(taskId);
+    }
     execPayload =abi.encodeCall(this.invest, (_account, _accountInvestmenIdx));
+  }
+
+  function getOwnInvestments() external view returns (Investment[] memory) {
+    require(accountIndexes[msg.sender] != 0, 'Sender Does not have active investments');
+    return investments[msg.sender];
   }
 }
