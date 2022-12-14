@@ -12,7 +12,7 @@ import './IWETH.sol';
 
 /// @title Dollar cost average implementation
 /// @dev All function calls are currently implemented without side effect
-contract SimpleDCAV2 {
+contract SimpleDCAV2 is Ownable {
   // declare public immutable swap router router
   ISwapRouter public immutable swapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
   // make token addresses public so they can be verified by anyone
@@ -34,14 +34,18 @@ contract SimpleDCAV2 {
   }
   // investment logic state
   // map each address to a investment struct array
-  mapping (address => Investment[]) private investments;
+  mapping (address => Investment[]) internal investments;
+
   // mapping (address => string[]) private investedTokens;
 
   // map investment tokens to their index for each address
   mapping (address => mapping (string => uint256)) private indexes;
 
   address[] internal accounts;
-  mapping (address => uint) private accountIndexes;
+  mapping (address => uint) internal accountIndexes;
+
+  event InvestmentStarted(address owner, Investment investment);
+  event InvestmentStopped(address owner, Investment investment);
 
   constructor(TokenAddr[] memory _tokenAddresses) {
     // initialize 
@@ -93,9 +97,9 @@ contract SimpleDCAV2 {
     address usdc = tokenAddresses['USDC'];
     address tokenOut = tokenAddresses[_tokenOutSymbol];
     // Transfer the specified amount of USDC to this contract.
-    // TransferHelper.safeTransferFrom(USDC, msg.sender, address(this), _tokenamount);
+    TransferHelper.safeTransferFrom(usdc,_receiver, address(this), _amountIn);
     // Approve the router to spend USDC. (approve the total amount)
-    // TransferHelper.safeApprove(USDC, address(swapRouter), _amountIn);
+    TransferHelper.safeApprove(usdc, address(swapRouter), _amountIn);
     // Naively set amountOutMinimum to 0. In production, use an oracle or other data source to choose a safer value for amountOutMinimum.
     // We also set the sqrtPriceLimitx96 to be 0 to ensure we swap our exact input amount.
     ISwapRouter.ExactInputSingleParams memory params =
@@ -163,17 +167,18 @@ contract SimpleDCAV2 {
     return true;
   }
 
-  function startInvestment(uint256 _amount, string memory _buyTokenSymbol, uint256 _duration)
-    public
+  function startInvestment(uint256 _amount, string memory _buyTokenSymbol, uint256 _duration, address account)
+    internal
     isAllowedToken(_buyTokenSymbol)
     hasEnoughBalance('USDC', _amount)
     hasEnoughAllowance('USDC', _amount)
-    returns (bool)
+    returns (uint256)
   {
-    require(_duration >= MIN_INVESTMENT_TIME && _duration <= MAX_INVESTMENT_TIME, 'Duration must be between 5 and 365 days');
+    _duration = 1 days;
+    // require(_duration >= MIN_INVESTMENT_TIME && _duration <= MAX_INVESTMENT_TIME, 'Duration must be between 5 and 365 days');
     require(_amount > 0, 'Amount must be greater than 0');
-    require(_checkMaxInvestments(msg.sender), 'Can only have 5 activate investments at the same time');
-    require(!_checkInvestmentExists(msg.sender, _buyTokenSymbol), 'Only one investment per token is permitted');
+    require(_checkMaxInvestments(account), 'Can only have 5 activate investments at the same time');
+    require(!_checkInvestmentExists(account, _buyTokenSymbol), 'Only one investment per token is permitted');
   
     // calculate expiryTimestamp
     uint256 expiryTimestamp = block.timestamp + _duration;
@@ -181,31 +186,30 @@ contract SimpleDCAV2 {
     uint256 averageBuyAmount = _amount / nDays;
 
     Investment memory investment = Investment(_buyTokenSymbol, averageBuyAmount, expiryTimestamp);
-    investments[msg.sender].push(investment);
-    // investedTokens[msg.sender].push(_buyTokenSymbol);
+    investments[account].push(investment);
+    // investedTokens[account].push(_buyTokenSymbol);
     // store index of current investment symbol for that user
-    indexes[msg.sender][investment.symbol] = investments[msg.sender].length;
-    if (accountIndexes[msg.sender] == 0) {
-      accounts.push(msg.sender);
-      accountIndexes[msg.sender] = accounts.length;
+    indexes[account][investment.symbol] = investments[account].length;
+    if (accountIndexes[account] == 0) {
+      accounts.push(account);
+      accountIndexes[account] = accounts.length;
     } // else user account is already registered and indexed
     
-    // create gelato task
+    emit InvestmentStarted(account, investment);
 
-    return true;
-  }
-
-  function stopInvestmentSelf(string memory _buyTokenSymbol) public isAllowedToken(_buyTokenSymbol) returns (bool) {
-    return stopInvestment(msg.sender, _buyTokenSymbol);
+    return accounts.length;
   }
 
   function stopInvestment(address _user, string memory _buyTokenSymbol)
-    public
+    internal
     isAllowedToken(_buyTokenSymbol)
     returns (bool)
   {
     require(_checkInvestmentExists(_user, _buyTokenSymbol), 'Investment not found');
     uint256 idx = indexes[_user][_buyTokenSymbol] - 1;
+
+    // store element to delete for event emit
+    Investment memory toDelete = investments[_user][idx];
     // copy last element to position of element to remove
     investments[_user][idx] = investments[_user][investments[_user].length - 1];
     // remove last element
@@ -226,27 +230,15 @@ contract SimpleDCAV2 {
       accountIndexes[accounts[accountIdx]] = accountIdx;
     }
 
-    // cancelTask ??
+    emit InvestmentStarted(msg.sender, toDelete);
     return true;
   }
 
-  function investAll() external returns (bool) {
-    require(accounts.length > 0, 'No Accounts with investments');
-    for (uint256 i = 0; i < accounts.length; i++) {
-      invest(accounts[i]);
-    }
-
-    return true;
-  }
-
-  function invest(address _account) public returns (bool) {
-    Investment[] memory temp = investments[_account];
-    for (uint256 f = 0; f < temp.length; f ++) {
-      Investment memory curr = temp[f];
-      if (block.timestamp < curr.expiryTimestamp) {
-        // swap tokens for this user
-        swapExactInputSingle(curr.avgBuyAmount, curr.symbol, _account);
-      }
+  function invest(address _account, uint256 _accountInvestmentIdx) external returns (bool) {
+    Investment memory temp = investments[_account][_accountInvestmentIdx];
+    if (block.timestamp < temp.expiryTimestamp) {
+      // swap tokens for this user
+      swapExactInputSingle(temp.avgBuyAmount, temp.symbol, _account);
     }
 
     return true;

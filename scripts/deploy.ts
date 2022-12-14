@@ -27,13 +27,19 @@ const mainnetDeploy = async (chainId: number) => {
   console.log('----- Deploying Contract -----\n');
   const [ signer ] = await ethers.getSigners();
   const gelatoOps = new GelatoOpsSDK(chainId, signer);
+  console.log(GELATO_ADDRESSES[`${chainId}`]);
+  console.log(GELATO_ADDRESSES[chainId]);
+  // console.log(gelatoOps);
   const dcaFactory = await ethers.getContractFactory("SimpleDCATask");
-  const dca = await dcaFactory.deploy(GELATO_ADDRESSES[chainId].ops, signer.address, allowedSwapTokens);
+  const dca = await dcaFactory.deploy(GELATO_ADDRESSES[`${chainId}`].ops, signer.address, allowedSwapTokens);
   
   await dca.deployed();
   console.log('----- Contract Deployed -----\n');
   console.log('Owner: ' + signer.address);
   console.log('Contract: ' + dca.address);
+
+  const tx = await dca.deposit({ value: ethers.utils.parseEther('0.1')});
+  console.log(await tx.wait());
 };
 
 const goerliDeploy = async (chainId: number) => {
@@ -52,6 +58,10 @@ const goerliDeploy = async (chainId: number) => {
   console.log('----- Contract Deployed -----\n');
   console.log('Owner: ' + signer.address);
   console.log('Contract: ' + dca.address);
+
+  // additionaly script needs to start smart contract task (it will run periodically checking for users investments and executing them if they exist)
+  // const tx = await dca.createTask();
+  // console.log('Task started at ' + tx);
 }
 
 const main = async () => {
