@@ -61,6 +61,7 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
   /// @return (bytes32) taskId
   function createTask(uint256 _amount, string memory _buyTokenSymbol, uint256 _duration)
     external
+    payable
     returns (bytes32)
   {
     uint256 accountInvestmentIdx = startInvestment(_amount, _buyTokenSymbol, _duration, msg.sender);
@@ -87,7 +88,7 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
       address(this),
       execData,
       moduleData,
-      address(0)
+      ETH
     );
 
     accountTaskToInvestmentIdx[msg.sender][id] = accountInvestmentIdx;
@@ -137,7 +138,7 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
     }
   }
 
-  function invest(address _account, uint256 _accountInvestmentIdx) external onlyDedicatedMsgSender() returns (bool) {
+  function invest(address _account, uint256 _accountInvestmentIdx) external onlyDedicatedMsgSender returns (bool) {
     Investment memory temp = investments[_account][_accountInvestmentIdx];
     if (block.timestamp < temp.expiryTimestamp) {
       // swap tokens for this user
