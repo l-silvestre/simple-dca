@@ -2,7 +2,7 @@ import { ethers, network } from "hardhat";
 import { GelatoOpsSDK, GELATO_ADDRESSES, isGelatoOpsSupported } from "@gelatonetwork/ops-sdk";
 import { TokenAddr } from "../interfaces";
 import { getUSDCTokenPairs } from "./queries";
-import { USDC_GOERLI_ADDRESS, USDC_MAINNET_ADDRESS, WBTC_GOERLI_ADDRESS, WETH_GOERLI_ADDRESS } from "../constants";
+import { DAI_GOERLI_ADDRESS, USDC_GOERLI_ADDRESS, USDC_MAINNET_ADDRESS, WBTC_GOERLI_ADDRESS, WETH_GOERLI_ADDRESS } from "../constants";
 
 const mainnetDeploy = async (chainId: number) => {
   console.log('----- Fetching Tokens data -----\n');
@@ -46,19 +46,23 @@ const goerliDeploy = async (chainId: number) => {
   const allowedSwapTokens: TokenAddr[] = [
     { symbol: 'USDC', addr: USDC_GOERLI_ADDRESS },
     { symbol: 'WETH', addr: WETH_GOERLI_ADDRESS },
-    { symbol: 'WBTC', addr: WBTC_GOERLI_ADDRESS }
+    { symbol: 'WBTC', addr: WBTC_GOERLI_ADDRESS },
+    { symbol: 'DAI', addr: DAI_GOERLI_ADDRESS },
   ];
   console.log('----- Deploying Contract -----\n');
   const [ signer ] = await ethers.getSigners();
   const gelatoOps = new GelatoOpsSDK(chainId, signer);
   const dcaFactory = await ethers.getContractFactory("SimpleDCATask");
   const dca = await dcaFactory.deploy(GELATO_ADDRESSES[chainId].ops, signer.address, allowedSwapTokens);
-  
+
   await dca.deployed();
   console.log('----- Contract Deployed -----\n');
   console.log('Owner: ' + signer.address);
   console.log('Contract: ' + dca.address);
 
+  /* const tx = await dca.deposit({ value: ethers.utils.parseEther('0.1')});
+  const fundTx = await tx.wait(); 
+  console.log(`fund txHash: ${fundTx.transactionHash}`); */
   // additionaly script needs to start smart contract task (it will run periodically checking for users investments and executing them if they exist)
   // const tx = await dca.createTask();
   // console.log('Task started at ' + tx);

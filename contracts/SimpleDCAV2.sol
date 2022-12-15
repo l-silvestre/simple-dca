@@ -87,7 +87,7 @@ contract SimpleDCAV2 is Ownable {
   /// @param _receiver Address of the swap recipient
   /// @return amountOut The amount received of desired token.
   function swapExactInputSingle(uint256 _amountIn, string memory _tokenOutSymbol, address _receiver)
-    private
+    internal
     isAllowedToken(_tokenOutSymbol)
     hasEnoughBalance('USDC', _amountIn)
     hasEnoughAllowance('USDC', _amountIn)
@@ -174,16 +174,17 @@ contract SimpleDCAV2 is Ownable {
     hasEnoughAllowance('USDC', _amount)
     returns (uint256)
   {
-    _duration = 1 days;
+    _duration = 10 minutes; // testing value
     // require(_duration >= MIN_INVESTMENT_TIME && _duration <= MAX_INVESTMENT_TIME, 'Duration must be between 5 and 365 days');
+    require(_duration >= 10 minutes && _duration <= 20 minutes, 'Duration must be between 10 and 20 minutes');
     require(_amount > 0, 'Amount must be greater than 0');
     require(_checkMaxInvestments(account), 'Can only have 5 activate investments at the same time');
     require(!_checkInvestmentExists(account, _buyTokenSymbol), 'Only one investment per token is permitted');
   
     // calculate expiryTimestamp
     uint256 expiryTimestamp = block.timestamp + _duration;
-    uint256 nDays = _duration / 60 / 60 / 24;
-    uint256 averageBuyAmount = _amount / nDays;
+    uint256 nIntervals = _duration / 60 / 2; // 2 minutes iteration
+    uint256 averageBuyAmount = _amount / nIntervals;
 
     Investment memory investment = Investment(_buyTokenSymbol, averageBuyAmount, expiryTimestamp);
     investments[account].push(investment);
@@ -231,16 +232,6 @@ contract SimpleDCAV2 is Ownable {
     }
 
     emit InvestmentStarted(msg.sender, toDelete);
-    return true;
-  }
-
-  function invest(address _account, uint256 _accountInvestmentIdx) external returns (bool) {
-    Investment memory temp = investments[_account][_accountInvestmentIdx];
-    if (block.timestamp < temp.expiryTimestamp) {
-      // swap tokens for this user
-      swapExactInputSingle(temp.avgBuyAmount, temp.symbol, _account);
-    }
-
     return true;
   }
 
