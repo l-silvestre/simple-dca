@@ -57,38 +57,38 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
   /// @dev Explain to a developer any extra details
   /// @param _amount a parameter just like in doxygen (must be followed by parameter name)
   /// @param _buyTokenSymbol string representing the symbol of the token to invest in
-  /// @param _duration timestamp
+  /// @param _numberExecutions number of times to invest
   /// @return (bytes32) taskId
-  function createTask(uint256 _amount, string memory _buyTokenSymbol, uint256 _duration)
+  function createTask(uint256 _amount, string memory _buyTokenSymbol, uint256 _numberExecutions)
     external
     payable
     returns (bytes32)
   {
-    uint256 accountInvestmentIdx = startInvestment(_amount, _buyTokenSymbol, _duration, msg.sender);
+    uint256 accountInvestmentIdx = startInvestment(_amount, _buyTokenSymbol, _numberExecutions, msg.sender);
 
     bytes memory execData = abi.encodeCall(this.invest, (msg.sender, accountInvestmentIdx));
     /* bytes memory execData = abi.encodeCall(this.invest, msg.sender, ); */
 
     ModuleData memory moduleData = ModuleData({
-      modules: new Module[](3),
-      args: new bytes[](3)
+      modules: new Module[](2),
+      args: new bytes[](2)
     });
-    moduleData.modules[0] = Module.RESOLVER;
-    moduleData.modules[1] = Module.TIME;
-    moduleData.modules[2] = Module.PROXY;
+    // moduleData.modules[0] = Module.RESOLVER;
+    moduleData.modules[0] = Module.TIME;
+    moduleData.modules[1] = Module.PROXY;
 
-    moduleData.args[0] = _resolverModuleArg(
+    /* moduleData.args[0] = _resolverModuleArg(
       address(this),
       abi.encodeCall(this.checker, (msg.sender, accountInvestmentIdx))
-    );
-    moduleData.args[1] = _timeModuleArg(block.timestamp, interval);
-    moduleData.args[2] = _proxyModuleArg();
+    ); */
+    moduleData.args[0] = _timeModuleArg(block.timestamp, interval);
+    moduleData.args[1] = _proxyModuleArg();
 
     bytes32 id = _createTask(
       address(this),
       execData,
       moduleData,
-      ETH
+      address(0)
     );
 
     accountTaskToInvestmentIdx[msg.sender][id] = accountInvestmentIdx;
@@ -105,17 +105,18 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
   /// @notice Explain to an end user what this does
   /// @dev Explain to a developer any extra details
   /// @param _account a parameter just like in doxygen (must be followed by parameter name)
-  /// @param _accountInvestmenIdx a parameter just like in doxygen (must be followed by parameter name)
+  /// @param _accountInvestmentIdx a parameter just like in doxygen (must be followed by parameter name)
   /// @return (bool)
-  function cancelTaskInternal(address _account, uint256 _accountInvestmenIdx)
+  function cancelTask(address _account, uint256 _accountInvestmentIdx)
     external
     returns (bool)
   {
-    Investment memory temp = investments[msg.sender][_accountInvestmenIdx];
+    require(_account == msg.sender, 'Only owner can cancel investments');
+    Investment memory temp = investments[msg.sender][_accountInvestmentIdx - 1];
 
     bool hasCancelled = stopInvestment(msg.sender, temp.symbol);
     if (hasCancelled) {
-      bytes32 taskId = accountInvestmentIdxToTask[_account][_accountInvestmenIdx];
+      bytes32 taskId = accountInvestmentIdxToTask[_account][_accountInvestmentIdx];
       _cancelTask(taskId);
       emit TaskFinishedEvent(taskId);
       return true;
@@ -124,7 +125,7 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
     }
   }
 
-   /// @notice Explain to an end user what this does
+  /*  /// @notice Explain to an end user what this does
   /// @dev Explain to a developer any extra details
   /// @param _account a parameter just like in doxygen (must be followed by parameter name)
   /// @param _accountInvestmenIdx a parameter just like in doxygen (must be followed by parameter name)
@@ -136,18 +137,21 @@ contract SimpleDCATask is OpsTaskCreator, SimpleDCAV2 {
     } else {
       execPayload = abi.encodeCall(this.invest, (_account, _accountInvestmenIdx));
     }
-  }
+  } */
 
-  function invest(address _account, uint256 _accountInvestmentIdx) external onlyDedicatedMsgSender returns (bool) {
-    Investment memory temp = investments[_account][_accountInvestmentIdx];
+  function invest(address _account, uint256 _accountInvestmentIdx) external returns (bool) {
+    Investment memory temp = investments[_account][_accountInvestmentIdx - 1];
     if (block.timestamp < temp.expiryTimestamp) {
       // swap tokens for this user
       swapExactInputSingle(temp.avgBuyAmount, temp.symbol, _account);
+    } else {
+      bool hasCancelled = stopInvestment(msg.sender, temp.symbol);
+      if (hasCancelled) {
+        bytes32 taskId = accountInvestmentIdxToTask[_account][_accountInvestmentIdx];
+        _cancelTask(taskId);
+        emit TaskFinishedEvent(taskId);
+      }
     }
-
-    (uint256 fee, address feeToken) = _getFeeDetails();
-
-    _transfer(fee, feeToken);
 
     return true;
   }

@@ -32,6 +32,7 @@ contract SimpleDCAV2 is Ownable {
     uint256 avgBuyAmount;
     uint256 expiryTimestamp;
   }
+
   // investment logic state
   // map each address to a investment struct array
   mapping (address => Investment[]) internal investments;
@@ -39,7 +40,7 @@ contract SimpleDCAV2 is Ownable {
   // mapping (address => string[]) private investedTokens;
 
   // map investment tokens to their index for each address
-  mapping (address => mapping (string => uint256)) private indexes;
+  mapping (address => mapping (string => uint256)) internal indexes;
 
   address[] internal accounts;
   mapping (address => uint) internal accountIndexes;
@@ -67,7 +68,19 @@ contract SimpleDCAV2 is Ownable {
   }
 
   modifier hasEnoughAllowance(string memory _tokenSymbol, uint256 _amount) {
-    require(getAllowance(_tokenSymbol) >= _amount, 'Must approve correct amount of USDC tokens before swap');
+    require(getAllowance(_tokenSymbol) >= _amount, 'Must approve correct amount of tokens before swap');
+    _;
+  }
+
+  modifier hasEnoughUSDCBalance(uint256 _amount, address _account) {
+    uint256 balance = IERC20(tokenAddresses['USDC']).balanceOf(_account);
+    require(balance > _amount, 'Not enough funds');
+    _;
+  }
+
+  modifier hasEnoughUSDCAllowance(uint256 _amount, address _account) {
+    uint256 allowance = IERC20(tokenAddresses['USDC']).allowance(_account, address(this));
+    require(allowance >= _amount, 'Must approve correct amount of USDC tokens before swap');
     _;
   }
 
@@ -85,19 +98,17 @@ contract SimpleDCAV2 is Ownable {
   /// @param _amountIn The exact amount of USDC that will be swapped for @param _tokenOutSymbol.
   /// @param _tokenOutSymbol The symbol of the token to be swapped with
   /// @param _receiver Address of the swap recipient
-  /// @return amountOut The amount received of desired token.
   function swapExactInputSingle(uint256 _amountIn, string memory _tokenOutSymbol, address _receiver)
     internal
     isAllowedToken(_tokenOutSymbol)
-    hasEnoughBalance('USDC', _amountIn)
-    hasEnoughAllowance('USDC', _amountIn)
-    returns (uint256 amountOut)
+    hasEnoughUSDCBalance(_amountIn, _receiver)
+    hasEnoughUSDCAllowance(_amountIn, _receiver)
+    returns (uint256)
   {
-    require(accountIndexes[_receiver] != 0, 'Recipient addres is an account in the contract');
-    address usdc = tokenAddresses['USDC'];
-    address tokenOut = tokenAddresses[_tokenOutSymbol];
+    require(accountIndexes[_receiver] != 0, 'Recipient address is not an account in the contract');
+    address usdc = tokenAddresses['USDC']; 
     // Transfer the specified amount of USDC to this contract.
-    TransferHelper.safeTransferFrom(usdc,_receiver, address(this), _amountIn);
+    TransferHelper.safeTransferFrom(usdc, _receiver, address(this), _amountIn);
     // Approve the router to spend USDC. (approve the total amount)
     TransferHelper.safeApprove(usdc, address(swapRouter), _amountIn);
     // Naively set amountOutMinimum to 0. In production, use an oracle or other data source to choose a safer value for amountOutMinimum.
@@ -105,7 +116,7 @@ contract SimpleDCAV2 is Ownable {
     ISwapRouter.ExactInputSingleParams memory params =
       ISwapRouter.ExactInputSingleParams({
         tokenIn: usdc,
-        tokenOut: tokenOut,
+        tokenOut: tokenAddresses[_tokenOutSymbol],
         fee: POOL_FEE,
         recipient: _receiver,
         deadline: block.timestamp,
@@ -114,7 +125,7 @@ contract SimpleDCAV2 is Ownable {
         sqrtPriceLimitX96: 0
       });
     // The call to `exactInputSingle` executes the swap.
-    amountOut = swapRouter.exactInputSingle(params);
+    return swapRouter.exactInputSingle(params);
   }
 
   function swapWETHtoUSDC(uint256 _amount)
@@ -167,36 +178,35 @@ contract SimpleDCAV2 is Ownable {
     return true;
   }
 
-  function startInvestment(uint256 _amount, string memory _buyTokenSymbol, uint256 _duration, address account)
+  function startInvestment(uint256 _amount, string memory _buyTokenSymbol, uint256 _numberExecutions, address _account)
     internal
     isAllowedToken(_buyTokenSymbol)
-    hasEnoughBalance('USDC', _amount)
-    hasEnoughAllowance('USDC', _amount)
+    hasEnoughUSDCBalance(_amount, _account)
+    hasEnoughUSDCAllowance(_amount, _account)
     returns (uint256)
   {
-    _duration = 10 minutes; // testing value
+    _numberExecutions = 10; // testing value
     // require(_duration >= MIN_INVESTMENT_TIME && _duration <= MAX_INVESTMENT_TIME, 'Duration must be between 5 and 365 days');
-    require(_duration >= 10 minutes && _duration <= 20 minutes, 'Duration must be between 10 and 20 minutes');
+    require(_numberExecutions >= 5 && _numberExecutions <= 20, 'Duration must be between 10 and 20 minutes');
     require(_amount > 0, 'Amount must be greater than 0');
-    require(_checkMaxInvestments(account), 'Can only have 5 activate investments at the same time');
-    require(!_checkInvestmentExists(account, _buyTokenSymbol), 'Only one investment per token is permitted');
-  
+    require(_checkMaxInvestments(_account), 'Can only have 5 activate investments at the same time');
+    require(!_checkInvestmentExists(_account, _buyTokenSymbol), 'Only one investment per token is permitted');
+
     // calculate expiryTimestamp
-    uint256 expiryTimestamp = block.timestamp + _duration;
-    uint256 nIntervals = _duration / 60 / 2; // 2 minutes iteration
-    uint256 averageBuyAmount = _amount / nIntervals;
+    uint256 expiryTimestamp = block.timestamp + (_numberExecutions * 60);
+    uint256 averageBuyAmount = _amount / _numberExecutions;
 
     Investment memory investment = Investment(_buyTokenSymbol, averageBuyAmount, expiryTimestamp);
-    investments[account].push(investment);
+    investments[_account].push(investment);
     // investedTokens[account].push(_buyTokenSymbol);
     // store index of current investment symbol for that user
-    indexes[account][investment.symbol] = investments[account].length;
-    if (accountIndexes[account] == 0) {
-      accounts.push(account);
-      accountIndexes[account] = accounts.length;
+    indexes[_account][investment.symbol] = investments[_account].length;
+    if (accountIndexes[_account] == 0) {
+      accounts.push(_account);
+      accountIndexes[_account] = accounts.length;
     } // else user account is already registered and indexed
     
-    emit InvestmentStarted(account, investment);
+    emit InvestmentStarted(_account, investment);
 
     return accounts.length;
   }
@@ -211,16 +221,22 @@ contract SimpleDCAV2 is Ownable {
 
     // store element to delete for event emit
     Investment memory toDelete = investments[_user][idx];
-    // copy last element to position of element to remove
-    investments[_user][idx] = investments[_user][investments[_user].length - 1];
-    // remove last element
-    investments[_user].pop();
-    // update indexes mapping
-    // delete removed elemnt index
-    delete indexes[_user][_buyTokenSymbol];
-    // replace previous last element with new index
-    string memory symbol = investments[_user][idx].symbol;
-    indexes[_user][symbol] = idx;
+
+    if (investments[_user].length == 1) {
+      investments[_user].pop();
+      delete indexes[_user][_buyTokenSymbol];
+    } else {
+      // copy last element to position of element to remove
+      investments[_user][idx] = investments[_user][investments[_user].length - 1];
+      // remove last element
+      investments[_user].pop();
+      // update indexes mapping
+      // delete removed elemnt index
+      delete indexes[_user][_buyTokenSymbol];
+      // replace previous last element with new index
+      string memory symbol = investments[_user][idx].symbol;
+      indexes[_user][symbol] = idx; 
+    }
 
     if (investments[_user].length == 0) {
       uint accountIdx = accountIndexes[_user] - 1;
@@ -231,7 +247,7 @@ contract SimpleDCAV2 is Ownable {
       accountIndexes[accounts[accountIdx]] = accountIdx;
     }
 
-    emit InvestmentStarted(msg.sender, toDelete);
+    emit InvestmentStopped(msg.sender, toDelete);
     return true;
   }
 
